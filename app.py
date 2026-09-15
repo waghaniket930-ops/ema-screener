@@ -4,7 +4,7 @@ import yfinance as yf
 import pandas as pd
 import requests
 
-st.set_page_config(page_title="NSE & BSE 9/15 EMA Screener + TradingView", layout="wide")
+st.set_page_config(page_title="Universal Indian Stock Screener & TradingView", layout="wide")
 
 # Fetch all listed equities from official NSE archives
 @st.cache_data(ttl=86400)
@@ -73,10 +73,13 @@ def scan_batch(symbols, interval="1d"):
             
     return results
 
-# Full TradingView Pro Chart Terminal Widget
+# TradingView Pro Terminal: Unlocked symbol search for ALL symbols
 def render_full_tradingview(symbol, interval="D"):
     tv_map = {"1d": "D", "1h": "60", "15m": "15", "5m": "5"}
     chart_interval = tv_map.get(interval, "D")
+    
+    # Format symbol prefix correctly if not already present
+    formatted_symbol = symbol if ":" in symbol else f"NSE:{symbol}"
     
     tradingview_html = f"""
     <div class="tradingview-widget-container" style="height:720px; width:100%;">
@@ -85,7 +88,7 @@ def render_full_tradingview(symbol, interval="D"):
       <script type="text/javascript">
       new TradingView.widget({{
         "autosize": true,
-        "symbol": "NSE:{symbol}",
+        "symbol": "{formatted_symbol}",
         "interval": "{chart_interval}",
         "timezone": "Asia/Kolkata",
         "theme": "dark",
@@ -99,6 +102,9 @@ def render_full_tradingview(symbol, interval="D"):
         "details": true,
         "hotlist": true,
         "calendar": true,
+        "show_popup_button": true,
+        "popup_width": "1000",
+        "popup_height": "650",
         "studies": [
           {{
             "id": "MAExp@tv-basicstudies",
@@ -118,35 +124,54 @@ def render_full_tradingview(symbol, interval="D"):
 
 # --- App UI ---
 st.title("📈 All Indian Stocks Screener & TradingView Terminal")
-st.caption("Filters all NSE/SENSEX listed companies for **9 EMA > 15 EMA** with dedicated chart search.")
+st.caption("Scan all listed companies for **9 EMA > 15 EMA**, or search **any symbol in the world** directly inside TradingView.")
 
 all_symbols = get_all_symbols()
 
-# ----------------- SECTION 1: SEARCH ANY STOCK -----------------
-st.markdown("### 🔍 Search & Analyze Any Stock Chart")
-search_col1, search_col2 = st.columns([3, 1])
+# Popular market index shortcuts
+INDEX_SHORTCUTS = {
+    "NIFTY 50 Index": "NSE:NIFTY",
+    "BANK NIFTY Index": "NSE:BANKNIFTY",
+    "BSE SENSEX Index": "BSE:SENSEX",
+    "NIFTY IT Index": "NSE:CNXIT"
+}
 
-with search_col1:
-    direct_symbol = st.selectbox(
-        "Type or select any stock to open chart immediately:",
+# ----------------- SECTION 1: UNIVERSAL CHART SEARCH -----------------
+st.markdown("### 🔍 Chart Terminal (All Stocks, Indices & Commodities)")
+sc1, sc2, sc3 = st.columns([2, 2, 1])
+
+with sc1:
+    quick_index = st.selectbox("Quick Index View:", ["None"] + list(INDEX_SHORTCUTS.keys()))
+
+with sc2:
+    selected_stock = st.selectbox(
+        "Or pick from 2,000+ NSE Equities:",
         options=all_symbols,
         index=all_symbols.index("RELIANCE") if "RELIANCE" in all_symbols else 0
     )
-with search_col2:
-    search_timeframe = st.selectbox("Chart Timeframe", ["1d", "1h", "15m", "5m"], key="direct_tf")
 
-render_full_tradingview(direct_symbol, search_timeframe)
+with sc3:
+    chart_tf = st.selectbox("Timeframe", ["1d", "1h", "15m", "5m"], key="chart_tf")
+
+# Determine active symbol
+if quick_index != "None":
+    active_symbol = INDEX_SHORTCUTS[quick_index]
+else:
+    active_symbol = f"NSE:{selected_stock}"
+
+st.info("💡 **Tip:** You can also click the symbol name inside the top-left of the chart widget itself to search **any symbol across the globe** (NSE, BSE, MCX, Crypto, Forex).")
+render_full_tradingview(active_symbol, chart_tf)
 
 st.markdown("---")
 
 # ----------------- SECTION 2: 9/15 EMA SCREENER -----------------
-st.markdown("### ⚡ Screener: Scan for 9 EMA > 15 EMA")
+st.markdown("### ⚡ Screener: Scan All Stocks for 9 EMA > 15 EMA")
 
 col1, col2 = st.columns([1, 1])
 with col1:
     screener_timeframe = st.selectbox("Scan Timeframe", ["1d", "1h", "15m", "5m"], key="scan_tf")
 with col2:
-    scan_limit = st.slider("Scan universe size", min_value=50, max_value=len(all_symbols), value=200, step=50)
+    scan_limit = st.slider("Number of stocks to scan", min_value=50, max_value=len(all_symbols), value=200, step=50)
 
 if st.button("🚀 Run 9/15 EMA Screener", type="primary"):
     pool = all_symbols[:scan_limit]
@@ -178,7 +203,7 @@ if "screener_results" in st.session_state and not st.session_state["screener_res
     st.dataframe(df_res, use_container_width=True)
     
     st.markdown("#### View Screened Match in Chart")
-    match_pick = st.selectbox("Choose from screened results:", df_res["Symbol"].tolist())
+    match_pick = st.selectbox("Select match to open in TradingView:", df_res["Symbol"].tolist())
     if match_pick:
-        render_full_tradingview(match_pick, screener_timeframe)
-                            
+        render_full_tradingview(f"NSE:{match_pick}", screener_timeframe)
+        
