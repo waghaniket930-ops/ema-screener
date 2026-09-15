@@ -4,22 +4,19 @@ import yfinance as yf
 import pandas as pd
 import requests
 
-st.set_page_config(page_title="All 2000+ NSE Stocks Screener (9/15 EMA)", layout="wide")
+st.set_page_config(page_title="NSE 9/15 EMA Screener - TradingView Pro", layout="wide")
 
-# Fetch all 2000+ official equity tickers directly from NSE
+# Fetch all listed equities from official NSE archives
 @st.cache_data(ttl=86400)
 def get_all_nse_symbols():
     try:
         url = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        headers = {"User-Agent": "Mozilla/5.0"}
         resp = requests.get(url, headers=headers, timeout=15)
         df = pd.read_csv(pd.io.common.StringIO(resp.text))
-        # Keep only equity segment (EQ)
         eq_df = df[df[" SERIES"].str.strip() == "EQ"] if " SERIES" in df.columns else df
-        symbols = [sym.strip() for sym in eq_df["SYMBOL"].dropna().tolist()]
-        return symbols
+        return [sym.strip() for sym in eq_df["SYMBOL"].dropna().tolist()]
     except Exception:
-        # Fallback list
         return ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "BHARTIARTL", "ITC", "SBIN", "LT", "BAJFINANCE"]
 
 # Fast multi-threaded batch scanner
@@ -27,7 +24,6 @@ def scan_batch(symbols, interval="1d"):
     tickers = [f"{s}.NS" for s in symbols]
     period = "1mo" if interval in ["5m", "15m", "1h"] else "3mo"
     
-    # Batch download all tickers at once
     data = yf.download(
         tickers=" ".join(tickers),
         period=period,
@@ -55,7 +51,6 @@ def scan_batch(symbols, interval="1d"):
             p_9 = float(ema_9.iloc[-2])
             p_15 = float(ema_15.iloc[-2])
 
-            # Filter: 9 EMA > 15 EMA
             if c_9 > c_15:
                 is_fresh = (p_9 <= p_15)
                 spread = round(((c_9 - c_15) / c_15) * 100, 2)
@@ -65,101 +60,101 @@ def scan_batch(symbols, interval="1d"):
                     "9 EMA": round(c_9, 2),
                     "15 EMA": round(c_15, 2),
                     "Spread (%)": spread,
-                    "Signal": "🚀 Fresh 9/15 Cross" if is_fresh else "🟢 9 EMA > 15 EMA"
+                    "Signal": "🚀 Fresh Cross" if is_fresh else "🟢 9 > 15 Trend"
                 })
         except Exception:
             continue
             
     return results
 
-# TradingView chart embedding
-def render_tv_chart(symbol, interval="D"):
+# Full TradingView Pro Chart Terminal Widget
+def render_full_tradingview(symbol, interval="D"):
     tv_map = {"1d": "D", "1h": "60", "15m": "15", "5m": "5"}
     chart_interval = tv_map.get(interval, "D")
     
-    html_code = f"""
-    <div class="tradingview-widget-container" style="height:620px;width:100%;">
-      <div id="tv_chart" style="height:calc(100% - 32px);width:100%;"></div>
+    tradingview_html = f"""
+    <div class="tradingview-widget-container" style="height:720px; width:100%;">
+      <div id="tradingview_full_chart" style="height:100%; width:100%;"></div>
       <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
       <script type="text/javascript">
-      new TradingView.widget(
-      {{
+      new TradingView.widget({{
         "autosize": true,
         "symbol": "NSE:{symbol}",
         "interval": "{chart_interval}",
         "timezone": "Asia/Kolkata",
         "theme": "dark",
         "style": "1",
-        "locale": "en",
+        "locale": "in",
+        "toolbar_bg": "#131722",
         "enable_publishing": false,
+        "hide_side_toolbar": false,
         "allow_symbol_change": true,
+        "save_image": true,
+        "details": true,
+        "hotlist": true,
+        "calendar": true,
         "studies": [
-          {{ "id": "MAExp@tv-basicstudies", "inputs": {{ "length": 9 }} }},
-          {{ "id": "MAExp@tv-basicstudies", "inputs": {{ "length": 15 }} }}
+          {{
+            "id": "MAExp@tv-basicstudies",
+            "inputs": {{ "length": 9 }}
+          }},
+          {{
+            "id": "MAExp@tv-basicstudies",
+            "inputs": {{ "length": 15 }}
+          }}
         ],
-        "container_id": "tv_chart"
-      }}
-      );
+        "container_id": "tradingview_full_chart"
+      }});
       </script>
     </div>
     """
-    components.html(html_code, height=620)
+    components.html(tradingview_html, height=730)
 
-# --- Streamlit UI ---
-st.title("⚡ All 2000+ NSE Stocks Screener")
-st.caption("Batch scanning all listed NSE equity stocks for **9 EMA > 15 EMA** + TradingView charts.")
+# --- Layout ---
+st.title("📈 NSE 9 & 15 EMA Screener (TradingView Interface)")
 
 all_symbols = get_all_nse_symbols()
-st.info(f"Loaded **{len(all_symbols)}** active NSE listed companies from official archives.")
+st.caption(f"Loaded **{len(all_symbols)}** NSE listed equities. Filtered for **9 EMA > 15 EMA**.")
 
-col1, col2 = st.columns(2)
+col1, col2 = st.columns([1, 1])
 with col1:
-    timeframe = st.selectbox("Select Timeframe", ["1d", "1h", "15m", "5m"])
+    timeframe = st.selectbox("Timeframe", ["1d", "1h", "15m", "5m"])
 with col2:
-    scan_limit = st.slider("Number of stocks to scan", min_value=50, max_value=len(all_symbols), value=len(all_symbols), step=50)
+    scan_limit = st.slider("Scan limit (Batch Size)", min_value=50, max_value=len(all_symbols), value=200, step=50)
 
-if st.button("🚀 Scan All NSE Stocks", type="primary"):
-    target_stocks = all_symbols[:scan_limit]
-    batch_size = 100
-    all_results = []
+if st.button("🚀 Run EMA Scan", type="primary"):
+    pool = all_symbols[:scan_limit]
+    all_matches = []
     
-    prog_bar = st.progress(0)
+    prog = st.progress(0)
     status = st.empty()
+    batch_size = 50
 
-    # Process in batches of 100 for high speed
-    for i in range(0, len(target_stocks), batch_size):
-        chunk = target_stocks[i:i + batch_size]
-        status.text(f"Scanning stocks {i+1} to {min(i + batch_size, len(target_stocks))} of {len(target_stocks)}...")
+    for i in range(0, len(pool), batch_size):
+        chunk = pool[i:i + batch_size]
+        status.text(f"Scanning stocks {i+1} to {min(i + batch_size, len(pool))} of {len(pool)}...")
         res = scan_batch(chunk, interval=timeframe)
-        all_results.extend(res)
-        prog_bar.progress(min((i + batch_size) / len(target_stocks), 1.0))
+        all_matches.extend(res)
+        prog.progress(min((i + batch_size) / len(pool), 1.0))
 
     status.empty()
-    prog_bar.empty()
+    prog.empty()
 
-    if all_results:
-        st.session_state["results"] = pd.DataFrame(all_results)
+    if all_matches:
+        st.session_state["results"] = pd.DataFrame(all_matches)
     else:
         st.session_state["results"] = pd.DataFrame()
-        st.warning("No stocks matched the 9 EMA > 15 EMA condition.")
+        st.warning("No stocks found matching 9 EMA > 15 EMA.")
 
-# Display results table & TradingView chart
+# Screener Output & TradingView Terminal
 if "results" in st.session_state and not st.session_state["results"].empty:
     df_res = st.session_state["results"]
-    st.subheader(f"Matching Stocks Found: {len(df_res)}")
-    
-    st.dataframe(
-        df_res.style.map(
-            lambda v: "color: #00E676; font-weight: bold;" if "Fresh" in str(v) else "color: #81C784;",
-            subset=["Signal"]
-        ),
-        use_container_width=True
-    )
+    st.subheader(f"Matching Stocks ({len(df_res)})")
+    st.dataframe(df_res, use_container_width=True)
 
     st.markdown("---")
-    st.subheader("📊 Live TradingView Chart")
-    selected_stock = st.selectbox("Pick a stock from results:", df_res["Symbol"].tolist())
+    st.subheader("🖥️ TradingView Full Analysis Terminal")
+    selected_stock = st.selectbox("Select stock to open:", df_res["Symbol"].tolist())
     
     if selected_stock:
-        render_tv_chart(selected_stock, timeframe)
-    
+        render_full_tradingview(selected_stock, timeframe)
