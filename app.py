@@ -4,20 +4,25 @@ import yfinance as yf
 import pandas as pd
 import requests
 
-st.set_page_config(page_title="NSE 9/15 EMA Screener - TradingView Pro", layout="wide")
+st.set_page_config(page_title="NSE & BSE 9/15 EMA Screener + TradingView", layout="wide")
 
 # Fetch all listed equities from official NSE archives
 @st.cache_data(ttl=86400)
-def get_all_nse_symbols():
+def get_all_symbols():
     try:
         url = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
         headers = {"User-Agent": "Mozilla/5.0"}
         resp = requests.get(url, headers=headers, timeout=15)
         df = pd.read_csv(pd.io.common.StringIO(resp.text))
         eq_df = df[df[" SERIES"].str.strip() == "EQ"] if " SERIES" in df.columns else df
-        return [sym.strip() for sym in eq_df["SYMBOL"].dropna().tolist()]
+        symbols = sorted(list(set([sym.strip() for sym in eq_df["SYMBOL"].dropna().tolist()])))
+        return symbols
     except Exception:
-        return ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "BHARTIARTL", "ITC", "SBIN", "LT", "BAJFINANCE"]
+        return sorted([
+            "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "BHARTIARTL", 
+            "ITC", "SBIN", "LT", "BAJFINANCE", "HCLTECH", "MARUTI", "SUNPHARMA",
+            "TATAMOTORS", "KOTAKBANK", "AXISBANK", "NTPC", "TITAN", "POWERGRID"
+        ])
 
 # Fast multi-threaded batch scanner
 def scan_batch(symbols, interval="1d"):
@@ -51,6 +56,7 @@ def scan_batch(symbols, interval="1d"):
             p_9 = float(ema_9.iloc[-2])
             p_15 = float(ema_15.iloc[-2])
 
+            # Condition: 9 EMA strictly above 15 EMA
             if c_9 > c_15:
                 is_fresh = (p_9 <= p_15)
                 spread = round(((c_9 - c_15) / c_15) * 100, 2)
@@ -60,7 +66,7 @@ def scan_batch(symbols, interval="1d"):
                     "9 EMA": round(c_9, 2),
                     "15 EMA": round(c_15, 2),
                     "Spread (%)": spread,
-                    "Signal": "🚀 Fresh Cross" if is_fresh else "🟢 9 > 15 Trend"
+                    "Signal": "🚀 Fresh Cross" if is_fresh else "🟢 9 > 15 Uptrend"
                 })
         except Exception:
             continue
@@ -110,19 +116,39 @@ def render_full_tradingview(symbol, interval="D"):
     """
     components.html(tradingview_html, height=730)
 
-# --- Layout ---
-st.title("📈 NSE 9 & 15 EMA Screener (TradingView Interface)")
+# --- App UI ---
+st.title("📈 All Indian Stocks Screener & TradingView Terminal")
+st.caption("Filters all NSE/SENSEX listed companies for **9 EMA > 15 EMA** with dedicated chart search.")
 
-all_symbols = get_all_nse_symbols()
-st.caption(f"Loaded **{len(all_symbols)}** NSE listed equities. Filtered for **9 EMA > 15 EMA**.")
+all_symbols = get_all_symbols()
+
+# ----------------- SECTION 1: SEARCH ANY STOCK -----------------
+st.markdown("### 🔍 Search & Analyze Any Stock Chart")
+search_col1, search_col2 = st.columns([3, 1])
+
+with search_col1:
+    direct_symbol = st.selectbox(
+        "Type or select any stock to open chart immediately:",
+        options=all_symbols,
+        index=all_symbols.index("RELIANCE") if "RELIANCE" in all_symbols else 0
+    )
+with search_col2:
+    search_timeframe = st.selectbox("Chart Timeframe", ["1d", "1h", "15m", "5m"], key="direct_tf")
+
+render_full_tradingview(direct_symbol, search_timeframe)
+
+st.markdown("---")
+
+# ----------------- SECTION 2: 9/15 EMA SCREENER -----------------
+st.markdown("### ⚡ Screener: Scan for 9 EMA > 15 EMA")
 
 col1, col2 = st.columns([1, 1])
 with col1:
-    timeframe = st.selectbox("Timeframe", ["1d", "1h", "15m", "5m"])
+    screener_timeframe = st.selectbox("Scan Timeframe", ["1d", "1h", "15m", "5m"], key="scan_tf")
 with col2:
-    scan_limit = st.slider("Scan limit (Batch Size)", min_value=50, max_value=len(all_symbols), value=200, step=50)
+    scan_limit = st.slider("Scan universe size", min_value=50, max_value=len(all_symbols), value=200, step=50)
 
-if st.button("🚀 Run EMA Scan", type="primary"):
+if st.button("🚀 Run 9/15 EMA Screener", type="primary"):
     pool = all_symbols[:scan_limit]
     all_matches = []
     
@@ -133,7 +159,7 @@ if st.button("🚀 Run EMA Scan", type="primary"):
     for i in range(0, len(pool), batch_size):
         chunk = pool[i:i + batch_size]
         status.text(f"Scanning stocks {i+1} to {min(i + batch_size, len(pool))} of {len(pool)}...")
-        res = scan_batch(chunk, interval=timeframe)
+        res = scan_batch(chunk, interval=screener_timeframe)
         all_matches.extend(res)
         prog.progress(min((i + batch_size) / len(pool), 1.0))
 
@@ -141,20 +167,18 @@ if st.button("🚀 Run EMA Scan", type="primary"):
     prog.empty()
 
     if all_matches:
-        st.session_state["results"] = pd.DataFrame(all_matches)
+        st.session_state["screener_results"] = pd.DataFrame(all_matches)
     else:
-        st.session_state["results"] = pd.DataFrame()
-        st.warning("No stocks found matching 9 EMA > 15 EMA.")
+        st.session_state["screener_results"] = pd.DataFrame()
+        st.warning("No stocks found matching 9 EMA > 15 EMA in this batch.")
 
-# Screener Output & TradingView Terminal
-if "results" in st.session_state and not st.session_state["results"].empty:
-    df_res = st.session_state["results"]
+if "screener_results" in st.session_state and not st.session_state["screener_results"].empty:
+    df_res = st.session_state["screener_results"]
     st.subheader(f"Matching Stocks ({len(df_res)})")
     st.dataframe(df_res, use_container_width=True)
-
-    st.markdown("---")
-    st.subheader("🖥️ TradingView Full Analysis Terminal")
-    selected_stock = st.selectbox("Select stock to open:", df_res["Symbol"].tolist())
     
-    if selected_stock:
-        render_full_tradingview(selected_stock, timeframe)
+    st.markdown("#### View Screened Match in Chart")
+    match_pick = st.selectbox("Choose from screened results:", df_res["Symbol"].tolist())
+    if match_pick:
+        render_full_tradingview(match_pick, screener_timeframe)
+                            
