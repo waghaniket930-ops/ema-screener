@@ -130,12 +130,11 @@ all_symbols = get_all_symbols()
 
 # Popular market index shortcuts
 INDEX_SHORTCUTS = {
-    "NIFTY 50 Index": "NSE:NIFTY",
-    "BANK NIFTY Index": "NSE:BANKNIFTY",
-    "BSE SENSEX Index": "BSE:SENSEX",
-    "NIFTY IT Index": "NSE:CNXIT"
+    "RELIANCE (Nifty Heavyweight)": "NSE:RELIANCE",
+    "HDFC BANK (BankNifty Heavyweight)": "NSE:HDFCBANK",
+    "TCS (IT Heavyweight)": "NSE:TCS",
+    "STATE BANK OF INDIA": "NSE:SBIN"
 }
-
 # ----------------- SECTION 1: UNIVERSAL CHART SEARCH -----------------
 st.markdown("### 🔍 Chart Terminal (All Stocks, Indices & Commodities)")
 sc1, sc2, sc3 = st.columns([2, 2, 1])
