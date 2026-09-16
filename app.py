@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 
-st.set_page_config(page_title="NSE 9/15 EMA Screener & Native Charts", layout="wide")
+st.set_page_config(page_title="NSE 9/15 EMA Screener (Angel One Ready)", layout="wide")
 
 # Fetch all listed equities from official NSE archives
 @st.cache_data(ttl=86400)
@@ -24,12 +24,12 @@ def get_all_symbols():
             "TATAMOTORS", "KOTAKBANK", "AXISBANK", "NTPC", "TITAN", "POWERGRID"
         ])
 
-# Simple native candlestick + 9/15 EMA chart (No TradingView)
+# Simple native candlestick + 9/15 EMA chart
 def render_native_chart(symbol, interval="1d"):
     period = "1mo" if interval in ["5m", "15m", "1h"] else "6mo"
     ticker = f"{symbol}.NS" if not symbol.endswith(".NS") else symbol
     
-    with st.spinner(f"Loading candles for {symbol}..."):
+    with st.spinner(f"Loading chart for {symbol}..."):
         df = yf.download(ticker, period=period, interval=interval, progress=False)
         
     if df.empty or len(df) < 16:
@@ -42,12 +42,10 @@ def render_native_chart(symbol, interval="1d"):
     df["EMA_9"] = df["Close"].ewm(span=9, adjust=False).mean()
     df["EMA_15"] = df["Close"].ewm(span=15, adjust=False).mean()
     
-    # Show last 80 candles for clear visualization
     chart_df = df.tail(80)
 
     fig = go.Figure()
 
-    # Candlestick Trace
     fig.add_trace(go.Candlestick(
         x=chart_df.index,
         open=chart_df["Open"],
@@ -59,7 +57,6 @@ def render_native_chart(symbol, interval="1d"):
         decreasing_line_color="#ef5350"
     ))
 
-    # 9 EMA line (Green)
     fig.add_trace(go.Scatter(
         x=chart_df.index,
         y=chart_df["EMA_9"],
@@ -67,7 +64,6 @@ def render_native_chart(symbol, interval="1d"):
         name="9 EMA"
     ))
 
-    # 15 EMA line (Red)
     fig.add_trace(go.Scatter(
         x=chart_df.index,
         y=chart_df["EMA_15"],
@@ -76,11 +72,11 @@ def render_native_chart(symbol, interval="1d"):
     ))
 
     fig.update_layout(
-        title=f"{symbol} Candlestick Chart ({interval})",
+        title=f"{symbol} Simple Candlestick Chart ({interval})",
         yaxis_title="Price (₹)",
         xaxis_rangeslider_visible=False,
         template="plotly_dark",
-        height=550,
+        height=520,
         margin=dict(l=20, r=20, t=50, b=20),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
@@ -136,12 +132,12 @@ def scan_batch(symbols, interval="1d"):
     return results
 
 # --- UI Dashboard ---
-st.title("📈 Indian Stock Screener & Simple Candlestick Chart")
-st.caption("Scan all NSE listed companies for **9 EMA > 15 EMA** with clean built-in candlestick charts.")
+st.title("📈 NSE 9/15 EMA Screener")
+st.caption("Scan all listed companies for 9 EMA > 15 EMA • Quick links for Angel One & TradingView execution")
 
 all_symbols = get_all_symbols()
 
-# ----------------- SECTION 1: SEARCH ANY STOCK -----------------
+# ----------------- SECTION 1: SEARCH & CHART -----------------
 st.markdown("### 🔍 Chart Any Stock")
 col_s1, col_s2 = st.columns([3, 1])
 
@@ -156,6 +152,15 @@ with col_s2:
     chart_tf = st.selectbox("Timeframe", ["1d", "1h", "15m", "5m"], key="chart_tf")
 
 render_native_chart(selected_stock, chart_tf)
+
+# Quick Angel One Broker Launch Buttons
+b_col1, b_col2 = st.columns(2)
+with b_col1:
+    tv_live_url = f"https://in.tradingview.com/chart/?symbol=NSE:{selected_stock}"
+    st.link_button(f"📊 Open {selected_stock} on TradingView (Angel One Login)", tv_live_url)
+with b_col2:
+    angel_trade_url = "https://trade.angelone.in/"
+    st.link_button("📲 Launch Angel One Trade Portal", angel_trade_url)
 
 st.markdown("---")
 
@@ -201,3 +206,10 @@ if "screener_results" in st.session_state and not st.session_state["screener_res
     match_pick = st.selectbox("Choose a stock from screened results:", df_res["Symbol"].tolist())
     if match_pick:
         render_native_chart(match_pick, screener_timeframe)
+        
+        m_col1, m_col2 = st.columns(2)
+        with m_col1:
+            st.link_button(f"📊 Open {match_pick} on TradingView (Angel One)", f"https://in.tradingview.com/chart/?symbol=NSE:{match_pick}")
+        with m_col2:
+            st.link_button("📲 Launch Angel One Trade Portal", "https://trade.angelone.in/")
+    
