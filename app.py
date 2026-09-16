@@ -4,7 +4,7 @@ import pandas as pd
 import requests
 import time
 
-st.set_page_config(page_title="NSE Live 9/15 EMA Screener", layout="wide")
+st.set_page_config(page_title="NSE 9/15 EMA Screener - Angel One", layout="wide")
 
 # Fetch all listed equities from official NSE archives
 @st.cache_data(ttl=86400)
@@ -65,9 +65,9 @@ def scan_batch(symbols, interval="5m"):
                     "9 EMA": round(c_9, 2),
                     "15 EMA": round(c_15, 2),
                     "Spread (%)": spread,
-                    "Status": "🚀 Fresh 9/15 Crossover" if is_fresh else "🟢 9 EMA > 15 EMA (Uptrend)",
-                    "Angel One": f"https://trade.angelone.in/",
-                    "TradingView": f"https://in.tradingview.com/chart/?symbol=NSE:{s}"
+                    "Setup": "🚀 Fresh 9/15 Crossover" if is_fresh else "🟢 9 EMA > 15 EMA (Uptrend)",
+                    "Angel One Chart": "https://trade.angelone.in/",
+                    "Live TV Chart": f"https://in.tradingview.com/chart/?symbol=NSE:{s}"
                 })
         except Exception:
             continue
@@ -75,23 +75,20 @@ def scan_batch(symbols, interval="5m"):
     return matches
 
 # --- UI Dashboard ---
-st.title("⚡ Real-Time NSE 9/15 EMA Bullish Screener")
-st.caption("Live scan for Indian Equities where **9 EMA > 15 EMA** (IST Market Hours: 9:15 AM – 3:30 PM)")
+st.title("⚡ NSE 9/15 EMA Live Screener (Angel One Compatible)")
+st.caption("Screens Indian equities for 9 EMA > 15 EMA • Trade directly via Angel One Trade / TradingView")
 
 all_symbols = get_all_symbols()
 
 col1, col2, col3 = st.columns([1, 1, 1])
-
 with col1:
     timeframe = st.selectbox("Select Timeframe", ["5m", "15m", "1h", "1d"], index=0)
-
 with col2:
     scan_limit = st.slider("Universe Size", min_value=50, max_value=len(all_symbols), value=150, step=50)
-
 with col3:
-    auto_refresh = st.checkbox("🔄 Auto Refresh (Every 30s)", value=False)
+    auto_refresh = st.checkbox("🔄 Auto-Refresh (Every 30s)", value=False)
 
-def run_scan():
+if st.button("🚀 Scan Market Now", type="primary"):
     pool = all_symbols[:scan_limit]
     results = []
     
@@ -110,39 +107,34 @@ def run_scan():
     prog.empty()
 
     if results:
-        st.session_state["ema_results"] = pd.DataFrame(results)
+        st.session_state["angel_results"] = pd.DataFrame(results)
     else:
-        st.session_state["ema_results"] = pd.DataFrame()
-        st.warning("No stocks currently have 9 EMA above 15 EMA in this batch.")
+        st.session_state["angel_results"] = pd.DataFrame()
+        st.warning("No stocks currently match the 9 EMA > 15 EMA condition.")
 
-if st.button("🚀 Scan Now", type="primary"):
-    run_scan()
-
-# Display Results
-if "ema_results" in st.session_state and not st.session_state["ema_results"].empty:
-    df_res = st.session_state["ema_results"]
+if "angel_results" in st.session_state and not st.session_state["angel_results"].empty:
+    df_res = st.session_state["angel_results"]
     
-    # Sort: Fresh Crossovers at the top, then largest EMA spread
-    df_res["is_fresh"] = df_res["Status"].str.contains("Fresh")
+    # Priority sorting: Fresh crossovers on top
+    df_res["is_fresh"] = df_res["Setup"].str.contains("Fresh")
     df_res = df_res.sort_values(by=["is_fresh", "Spread (%)"], ascending=[False, False]).drop(columns=["is_fresh"])
 
     st.subheader(f"Matching Stocks ({len(df_res)})")
 
-    # Render table with clickable execution links
+    # Table with clickable links for instant trading
     st.dataframe(
         df_res,
         column_config={
-            "TradingView": st.column_config.LinkColumn("TradingView Chart", display_text="Open Chart"),
-            "Angel One": st.column_config.LinkColumn("Angel One Trade", display_text="Trade on Angel"),
-            "Spread (%)": st.column_config.NumberColumn("EMA Spread %", format="%.2f%%"),
+            "Angel One Chart": st.column_config.LinkColumn("Angel One Web", display_text="Open Angel One"),
+            "Live TV Chart": st.column_config.LinkColumn("Real-Time Chart", display_text="Open Chart"),
+            "Spread (%)": st.column_config.NumberColumn("Spread %", format="%.2f%%"),
             "LTP (₹)": st.column_config.NumberColumn("LTP (₹)", format="₹%.2f"),
         },
         use_container_width=True,
         hide_index=True
     )
 
-# Auto-refresh loop
 if auto_refresh:
     time.sleep(30)
     st.rerun()
-                
+    
