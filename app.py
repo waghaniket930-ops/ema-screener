@@ -1,14 +1,10 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import yfinance as yf
 import pandas as pd
+import plotly.graph_objects as go
 import requests
 
-st.set_page_config(
-    page_title="NSE Live Screener (India IST)", 
-    layout="wide", 
-    initial_sidebar_state="collapsed"
-)
+st.set_page_config(page_title="NSE 9/15 EMA Screener & Charts", layout="wide")
 
 # Fetch all listed equities from official NSE archives
 @st.cache_data(ttl=86400)
@@ -19,7 +15,8 @@ def get_all_symbols():
         resp = requests.get(url, headers=headers, timeout=15)
         df = pd.read_csv(pd.io.common.StringIO(resp.text))
         eq_df = df[df[" SERIES"].str.strip() == "EQ"] if " SERIES" in df.columns else df
-        return sorted(list(set([sym.strip() for sym in eq_df["SYMBOL"].dropna().tolist()])))
+        symbols = sorted(list(set([sym.strip() for sym in eq_df["SYMBOL"].dropna().tolist()])))
+        return symbols
     except Exception:
         return sorted([
             "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "BHARTIARTL", 
@@ -27,50 +24,70 @@ def get_all_symbols():
             "TATAMOTORS", "KOTAKBANK", "AXISBANK", "NTPC", "TITAN", "POWERGRID"
         ])
 
-# Indian Market Real-Time Chart Widget (Configured for IST + NSE Feed)
-def render_india_realtime_chart(symbol, interval="5"):
-    clean_sym = symbol.replace("NSE:", "").replace(".NS", "").strip()
+# Simple native candlestick + 9/15 EMA chart
+def render_simple_chart(symbol, interval="1d"):
+    period = "1mo" if interval in ["5m", "15m", "1h"] else "6mo"
+    ticker = f"{symbol}.NS" if not symbol.endswith(".NS") else symbol
+    
+    with st.spinner(f"Loading chart for {symbol}..."):
+        df = yf.download(ticker, period=period, interval=interval, progress=False)
+        
+    if df.empty or len(df) < 15:
+        st.warning(f"No chart data available for {symbol}.")
+        return
 
-    tv_html = f"""
-    <div class="tradingview-widget-container" style="height:650px; width:100%;">
-      <div id="tv_chart_container" style="height:100%; width:100%;"></div>
-      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-      <script type="text/javascript">
-      new TradingView.widget({{
-        "autosize": true,
-        "symbol": "NSE:{clean_sym}",
-        "interval": "{interval}",
-        "timezone": "Asia/Kolkata",
-        "theme": "dark",
-        "style": "1",
-        "locale": "in",
-        "toolbar_bg": "#131722",
-        "enable_publishing": false,
-        "allow_symbol_change": true,
-        "save_image": true,
-        "hide_side_toolbar": false,
-        "withdateranges": true,
-        "studies": [
-          {{
-            "id": "MAExp@tv-basicstudies",
-            "inputs": {{ "length": 9 }}
-          }},
-          {{
-            "id": "MAExp@tv-basicstudies",
-            "inputs": {{ "length": 15 }}
-          }}
-        ],
-        "container_id": "tv_chart_container"
-      }});
-      </script>
-    </div>
-    """
-    components.html(tv_html, height=660)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [col[0] for col in df.columns]
 
-# Multi-threaded batch scanner for 9 EMA > 15 EMA
-def scan_batch(symbols, interval="15m"):
+    df["EMA_9"] = df["Close"].ewm(span=9, adjust=False).mean()
+    df["EMA_15"] = df["Close"].ewm(span=15, adjust=False).mean()
+    
+    # Display last 80 candles for clarity
+    chart_df = df.tail(80)
+
+    fig = go.Figure()
+
+    # Candlestick Trace
+    fig.add_trace(go.Candlestick(
+        x=chart_df.index,
+        open=chart_df["Open"],
+        high=chart_df["High"],
+        low=chart_df["Low"],
+        close=chart_df["Close"],
+        name="Price"
+    ))
+
+    # 9 EMA line (Green)
+    fig.add_trace(go.Scatter(
+        x=chart_df.index,
+        y=chart_df["EMA_9"],
+        line=dict(color="#00E676", width=2),
+        name="9 EMA"
+    ))
+
+    # 15 EMA line (Red)
+    fig.add_trace(go.Scatter(
+        x=chart_df.index,
+        y=chart_df["EMA_15"],
+        line=dict(color="#FF1744", width=2),
+        name="15 EMA"
+    ))
+
+    fig.update_layout(
+        title=f"{symbol} Candlestick Chart ({interval})",
+        yaxis_title="Price (₹)",
+        xaxis_rangeslider_visible=False,
+        template="plotly_dark",
+        height=550,
+        margin=dict(l=20, r=20, t=50, b=20)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+# Fast multi-threaded batch scanner
+def scan_batch(symbols, interval="1d"):
     tickers = [f"{s}.NS" for s in symbols]
-    period = "1mo" if interval in ["1m", "5m", "15m", "1h"] else "3mo"
+    period = "1mo" if interval in ["5m", "15m", "1h"] else "3mo"
     
     data = yf.download(
         tickers=" ".join(tickers),
@@ -99,6 +116,7 @@ def scan_batch(symbols, interval="15m"):
             p_9 = float(ema_9.iloc[-2])
             p_15 = float(ema_15.iloc[-2])
 
+            # Condition: 9 EMA strictly above 15 EMA
             if c_9 > c_15:
                 is_fresh = (p_9 <= p_15)
                 spread = round(((c_9 - c_15) / c_15) * 100, 2)
@@ -115,42 +133,40 @@ def scan_batch(symbols, interval="15m"):
             
     return results
 
-# --- UI Dashboard ---
-st.title("🇮🇳 NSE Real-Time Chart & 9/15 EMA Screener")
-st.caption("Live streaming ticks for Indian Equities (Asia/Kolkata IST) • Market Hours: 9:15 AM – 3:30 PM IST")
+# --- App UI ---
+st.title("📈 Indian Stock Screener & Simple Candlestick Chart")
+st.caption("Scan all NSE listed companies for **9 EMA > 15 EMA** with built-in interactive candlestick charts.")
 
 all_symbols = get_all_symbols()
 
-# ----------------- SECTION 1: LIVE CHART -----------------
-st.markdown("### 🔴 Live Real-Time Chart (IST)")
-col_c1, col_c2 = st.columns([3, 1])
+# ----------------- SECTION 1: SEARCH ANY STOCK -----------------
+st.markdown("### 🔍 Chart Any Stock")
+col_s1, col_s2 = st.columns([3, 1])
 
-with col_c1:
+with col_s1:
     selected_stock = st.selectbox(
-        "Select Stock for Real-Time IST Feed:",
+        "Select or type any stock to display chart:",
         options=all_symbols,
         index=all_symbols.index("RELIANCE") if "RELIANCE" in all_symbols else 0
     )
 
-with col_c2:
-    tf_options = {"5 Minutes": "5", "15 Minutes": "15", "1 Hour": "60", "Daily": "D"}
-    selected_tf_label = st.selectbox("Candle Timeframe", list(tf_options.keys()), index=1)
-    chart_interval = tf_options[selected_tf_label]
+with col_s2:
+    chart_tf = st.selectbox("Timeframe", ["1d", "1h", "15m", "5m"], key="chart_tf")
 
-render_india_realtime_chart(selected_stock, chart_interval)
+render_simple_chart(selected_stock, chart_tf)
 
 st.markdown("---")
 
-# ----------------- SECTION 2: SCREENER -----------------
-st.markdown("### ⚡ Scan Market for 9 EMA > 15 EMA")
+# ----------------- SECTION 2: 9/15 EMA SCREENER -----------------
+st.markdown("### ⚡ Screener: Scan for 9 EMA > 15 EMA")
 
 col1, col2 = st.columns([1, 1])
 with col1:
-    screener_tf = st.selectbox("Screener Timeframe", ["15m", "5m", "1h", "1d"], index=0)
+    screener_timeframe = st.selectbox("Scan Timeframe", ["1d", "1h", "15m", "5m"], key="scan_tf")
 with col2:
-    scan_limit = st.slider("Stocks to scan", min_value=50, max_value=len(all_symbols), value=150, step=50)
+    scan_limit = st.slider("Number of stocks to scan", min_value=50, max_value=len(all_symbols), value=200, step=50)
 
-if st.button("🚀 Run EMA Screener", type="primary"):
+if st.button("🚀 Run 9/15 EMA Screener", type="primary"):
     pool = all_symbols[:scan_limit]
     all_matches = []
     
@@ -161,7 +177,7 @@ if st.button("🚀 Run EMA Screener", type="primary"):
     for i in range(0, len(pool), batch_size):
         chunk = pool[i:i + batch_size]
         status.text(f"Scanning stocks {i+1} to {min(i + batch_size, len(pool))} of {len(pool)}...")
-        res = scan_batch(chunk, interval=screener_tf)
+        res = scan_batch(chunk, interval=screener_timeframe)
         all_matches.extend(res)
         prog.progress(min((i + batch_size) / len(pool), 1.0))
 
@@ -169,17 +185,17 @@ if st.button("🚀 Run EMA Screener", type="primary"):
     prog.empty()
 
     if all_matches:
-        st.session_state["results_df"] = pd.DataFrame(all_matches)
+        st.session_state["screener_results"] = pd.DataFrame(all_matches)
     else:
-        st.session_state["results_df"] = pd.DataFrame()
-        st.warning("No stocks matched the 9 EMA > 15 EMA condition.")
+        st.session_state["screener_results"] = pd.DataFrame()
+        st.warning("No stocks found matching 9 EMA > 15 EMA in this batch.")
 
-if "results_df" in st.session_state and not st.session_state["results_df"].empty:
-    df_res = st.session_state["results_df"]
+if "screener_results" in st.session_state and not st.session_state["screener_results"].empty:
+    df_res = st.session_state["screener_results"]
     st.subheader(f"Matching Stocks ({len(df_res)})")
     st.dataframe(df_res, use_container_width=True)
-
-    st.markdown("#### Open Match in Live Chart")
-    match_pick = st.selectbox("Choose a screened stock:", df_res["Symbol"].tolist())
+    
+    st.markdown("#### Inspect Screened Stock")
+    match_pick = st.selectbox("Choose a stock from screened results:", df_res["Symbol"].tolist())
     if match_pick:
-        render_india_realtime_chart(match_pick, chart_interval)
+        render_simple_chart(match_pick, screener_timeframe)
